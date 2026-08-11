@@ -17,6 +17,11 @@ const average = <T>(datums: T[], getter: (datum: T) => number) => {
 export const convertPixelGridToImageData = (pixel_grid: defs.PixelGrid, width: number, height: number) => {
   const source_width = pixel_grid[0].length;
   const source_height = pixel_grid.length;
+
+  // thank you floating point math
+  width = Math.floor(width);
+  height = Math.floor(height);
+
   const width_pixel_scale = width / source_width;
   const height_pixel_scale = height / source_height;
 
@@ -27,6 +32,12 @@ export const convertPixelGridToImageData = (pixel_grid: defs.PixelGrid, width: n
       const pixel_x = Math.floor(target_x / width_pixel_scale);
 
       const i = target_y * width * 4 + target_x * 4;
+
+      // Ensure i is within bounds to prevent silent buffer overflow
+      if (i >= image_data.data.length) {
+        continue;
+      }
+
       const { r, g, b } = pixel_grid[pixel_y][pixel_x];
 
       image_data.data[i] = r;

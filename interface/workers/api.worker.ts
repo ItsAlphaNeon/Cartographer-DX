@@ -52,10 +52,10 @@ const generatePreview = (params: GenerationParams) => {
   let width, height;
   if (params.scale.x > params.scale.y) {
     width = constants.RENDER_IMAGE_MAX_SIZE;
-    height = width * ratio_xy;
+    height = Math.round(width * ratio_xy);
   } else {
     height = constants.RENDER_IMAGE_MAX_SIZE;
-    width = height * ratio_yx;
+    width = Math.round(height * ratio_yx);
   }
 
   return pixels.conversion.convertPixelGridToImageData(color_converted, width, height);

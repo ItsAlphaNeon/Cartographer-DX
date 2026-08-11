@@ -5,7 +5,7 @@
     "build:packages": "pnpm run -r --filter {./packages/**} build",
     "build:interface": "cd interface && pnpm build",
     "build": "pnpm build:packages && pnpm build:interface",
-    "postinstall": "cp ./scripts/pre-commit.sh ./.git/hooks/pre-commit",
+    "postinstall": "node -e \"try{require('fs').copyFileSync('./scripts/pre-commit.sh','./.git/hooks/pre-commit')}catch(e){}\"",
     "watch": "pnpm build:packages && cd interface && pnpm watch",
     "test": "vitest"
   },
