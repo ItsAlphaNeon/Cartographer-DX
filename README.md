@@ -4,6 +4,8 @@ A web-based tool for converting images into Minecraft map-art, formatted in a va
 
 ## About
 
+(Note for this fork: This is my personal fork with a bunch of vibe coded features and improvements I needed in the moment. Yes, its garbage but it works for what I need to. 
+
 There are already some good implementations/alternatives to this tool out in the wild, most notably being [mapartcraft](https://rebane2001.com/mapartcraft/), however I found their interfaces very clunky to work in and hard to iterate fluidly on a map-art idea. I also wanted to add features that were missing and add support for outputting in alternative data formats such as `.litematic` files for the excellent [Litematica](https://github.com/maruohon/litematica) mod.
 
 Some features of this tool:
