@@ -94,6 +94,7 @@ export const ImagePreview: React.FC<Props> = (props) => {
     props.transformations.saturation,
     props.transformations.dither,
     props.transformations.dither_algorithm,
+    props.transformations.dither_strength,
     props.color_spectrum
   ]);
 

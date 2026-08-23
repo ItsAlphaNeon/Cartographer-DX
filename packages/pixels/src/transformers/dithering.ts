@@ -145,31 +145,35 @@ const createErrorDiffusionDitherTransformer = (
 // ---- Ordered / Bayer Dithering ----
 
 const BAYER_2x2 = [
-  [0, 2],
-  [3, 1]
+  [1, 3],
+  [4, 2]
 ];
 
 const BAYER_4x4 = [
-  [0, 8, 2, 10],
-  [12, 4, 14, 6],
-  [3, 11, 1, 9],
-  [15, 7, 13, 5]
+  [1, 9, 3, 11],
+  [13, 5, 15, 7],
+  [4, 12, 2, 10],
+  [16, 8, 14, 6]
 ];
 
 const ORDERED_3x3 = [
-  [0, 7, 5],
-  [3, 1, 8],
-  [6, 4, 2]
+  [1, 7, 4],
+  [5, 8, 3],
+  [6, 2, 9]
 ];
 
-const createOrderedDitherTransformer = (inner: defs.PixelTransformer, matrix: number[][]): defs.PixelTransformer => {
-  const matrixHeight = matrix.length;
-  const matrixWidth = matrix[0].length;
-  const matrixSize = matrixWidth * matrixHeight;
+const createOrderedDitherTransformer = (
+  inner: defs.PixelTransformer,
+  matrix: number[][],
+  strength: number
+): defs.PixelTransformer => {
+  const width = matrix.length;
+  const height = matrix[0].length;
+  const size = width * height;
 
   return (pixel, payload) => {
-    const threshold = (matrix[payload.y % matrixHeight][payload.x % matrixWidth] + 0.5) / matrixSize;
-    const noise = (threshold - 0.5) * 255;
+    const threshold = matrix[payload.x % width][payload.y % height] / (size + 1);
+    const noise = (threshold - 0.5) * strength;
     const noisyPixel = {
       r: Math.max(0, Math.min(255, pixel.r + noise)),
       g: Math.max(0, Math.min(255, pixel.g + noise)),
@@ -195,7 +199,8 @@ export const floydSteinbergDitherTransformer = (transformer: defs.PixelTransform
  */
 export const createDitherTransformer = (
   inner: defs.PixelTransformer,
-  algorithm: DitherAlgorithm
+  algorithm: DitherAlgorithm,
+  strength?: number
 ): defs.PixelTransformer => {
   switch (algorithm) {
     case 'floyd-steinberg':
@@ -211,11 +216,11 @@ export const createDitherTransformer = (
     case 'min-avg-err':
       return createErrorDiffusionDitherTransformer(inner, PATTERNS['min-avg-err']);
     case 'bayer-2x2':
-      return createOrderedDitherTransformer(inner, BAYER_2x2);
+      return createOrderedDitherTransformer(inner, BAYER_2x2, strength ?? 48);
     case 'bayer-4x4':
-      return createOrderedDitherTransformer(inner, BAYER_4x4);
+      return createOrderedDitherTransformer(inner, BAYER_4x4, strength ?? 48);
     case 'ordered-3x3':
-      return createOrderedDitherTransformer(inner, ORDERED_3x3);
+      return createOrderedDitherTransformer(inner, ORDERED_3x3, strength ?? 48);
   }
 };
 
@@ -231,3 +236,10 @@ export const DITHER_ALGORITHMS: DitherAlgorithm[] = [
   'bayer-4x4',
   'ordered-3x3'
 ];
+
+/** Algorithms that use the ordered/Bayer pattern (supports strength slider) */
+export const DITHER_ORDERED_ALGORITHMS: ReadonlySet<DitherAlgorithm> = new Set<DitherAlgorithm>([
+  'bayer-2x2',
+  'bayer-4x4',
+  'ordered-3x3'
+]);

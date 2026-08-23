@@ -61,6 +61,9 @@ type Props = {
 
   value: number;
   onChange: (value: number) => void;
+
+  min?: number;
+  max?: number;
 };
 
 export const Slider: React.FC<Props> = (props) => {
@@ -70,8 +73,8 @@ export const Slider: React.FC<Props> = (props) => {
 
       <SliderContainer>
         <StyledSlider
-          min={-100}
-          max={100}
+          min={props.min ?? -100}
+          max={props.max ?? 100}
           value={props.value}
           onChange={(value) => {
             props.onChange(value as number);

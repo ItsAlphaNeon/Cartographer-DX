@@ -172,6 +172,7 @@ export const MaterialsList: React.FC<Props> = (props) => {
     props.transformations.saturation,
     props.transformations.dither,
     props.transformations.dither_algorithm,
+    props.transformations.dither_strength,
     props.color_spectrum,
     props.support_block_id
   ]);

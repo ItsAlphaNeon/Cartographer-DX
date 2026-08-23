@@ -14,6 +14,7 @@ export type Transformations = {
   brightness?: number;
   dither?: boolean;
   dither_algorithm?: string;
+  dither_strength?: number;
 };
 export type GenerationParams = {
   image_data: ImageData;
@@ -46,7 +47,8 @@ const baseImagePipeline = (params: GenerationParams) => {
       params.transformations?.dither
         ? pixels.transformers.createDitherTransformer(
             palette_transformer,
-            (params.transformations.dither_algorithm as any) || 'floyd-steinberg'
+            (params.transformations.dither_algorithm as any) || 'floyd-steinberg',
+            params.transformations.dither_strength
           )
         : palette_transformer
     ]

@@ -245,6 +245,24 @@ export const SourceImage: React.FC<Props> = (props) => {
               />
             </div>
           </Tooltip>
+
+          {props.transformations.dither &&
+            props.transformations.dither_algorithm &&
+            pixels.transformers.DITHER_ORDERED_ALGORITHMS.has(props.transformations.dither_algorithm as any) && (
+              <Slider
+                label="Strength"
+                style={{ marginTop: 8 }}
+                value={props.transformations.dither_strength ?? 48}
+                min={0}
+                max={255}
+                onChange={(value) => {
+                  props.setTransformations({
+                    ...props.transformations,
+                    dither_strength: value
+                  });
+                }}
+              />
+            )}
         </div>
       </Options>
     </Container>
