@@ -5,10 +5,12 @@ import styled from 'styled-components';
 import * as hooks from '../hooks';
 import * as defs from '../defs';
 import * as React from 'react';
+import * as pixels from '@cartographer/pixels';
 import Slider from './slider';
 import * as _ from 'lodash';
 
-import CheckBox from './check-box';
+import MultiButton from './multi-button';
+import Tooltip from './tooltip';
 
 const Container = styled.div`
   display: flex;
@@ -33,6 +35,22 @@ const Options = styled.div`
   display: flex;
   flex-direction: row;
   flex-grow: 1;
+`;
+
+const ResetButton = styled.span`
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 11px;
+  color: ${(props) => props.theme.fg2};
+  border: 1px dashed ${(props) => props.theme.fg3};
+  padding: 2px 6px;
+  align-self: flex-end;
+  margin-top: 4px;
+
+  :hover {
+    color: ${(props) => props.theme.fg0};
+    border-color: ${(props) => props.theme.fg2};
+  }
 `;
 
 type Props = {
@@ -124,50 +142,109 @@ export const SourceImage: React.FC<Props> = (props) => {
       </CanvasContainer>
 
       <Options>
-        <Slider
-          label="Saturation"
-          style={{ marginTop: 10, marginRight: 15 }}
-          value={props.transformations.saturation || 0}
-          onChange={(value) => {
-            props.setTransformations({
-              ...props.transformations,
-              saturation: value
-            });
-          }}
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, marginRight: 15 }}>
+          <Slider
+            label="Saturation"
+            style={{ marginTop: 10 }}
+            value={props.transformations.saturation || 0}
+            onChange={(value) => {
+              props.setTransformations({
+                ...props.transformations,
+                saturation: value
+              });
+            }}
+          />
 
-        <Slider
-          label="Brightness"
-          style={{ marginTop: 10 }}
-          value={props.transformations.brightness || 0}
-          onChange={(value) => {
-            props.setTransformations({
-              ...props.transformations,
-              brightness: value
-            });
-          }}
-        />
+          <ResetButton
+            onClick={() => {
+              props.setTransformations({
+                ...props.transformations,
+                saturation: 0
+              });
+            }}
+          >
+            Reset
+          </ResetButton>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+          <Slider
+            label="Brightness"
+            style={{ marginTop: 10 }}
+            value={props.transformations.brightness || 0}
+            onChange={(value) => {
+              props.setTransformations({
+                ...props.transformations,
+                brightness: value
+              });
+            }}
+          />
+
+          <ResetButton
+            onClick={() => {
+              props.setTransformations({
+                ...props.transformations,
+                brightness: 0
+              });
+            }}
+          >
+            Reset
+          </ResetButton>
+        </div>
       </Options>
 
       <Options>
-        <div>
-          <CheckBox
+        <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+          <Tooltip
             style={{ marginTop: 5 }}
-            label="Enable dithering"
-            label_side="left"
+            direction="up"
             tooltip={[
               "Enabling dithering will introduce some intentional noise to the image with the aim of keeping as much of the original images' color as possible.",
               'This has varying levels of success depending on the input image and scaling/zooming applied. It is recommended to play with the image saturation when enabling this.',
               'Your milage may vary.'
             ]}
-            value={!!props.transformations.dither}
-            onChange={(value) => {
-              props.setTransformations({
-                ...props.transformations,
-                dither: value
-              });
-            }}
-          />
+          >
+            <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
+              <span
+                style={{
+                  marginRight: 10,
+                  color: 'rgba(255,255,255,0.65)',
+                  fontSize: 11,
+                  fontWeight: 'bold'
+                }}
+              >
+                Dithering
+              </span>
+              <MultiButton
+                selected={
+                  props.transformations.dither
+                    ? _.upperFirst(props.transformations.dither_algorithm || 'Floyd-Steinberg')
+                    : 'None'
+                }
+                action_opens_picker
+                onSelectionChange={(name) => {
+                  if (name === 'None') {
+                    props.setTransformations({
+                      ...props.transformations,
+                      dither: false
+                    });
+                  } else {
+                    props.setTransformations({
+                      ...props.transformations,
+                      dither: true,
+                      dither_algorithm: name.toLowerCase()
+                    });
+                  }
+                }}
+                actions={[
+                  { name: 'None' },
+                  ...pixels.transformers.DITHER_ALGORITHMS.map((alg) => ({
+                    name: _.upperFirst(alg)
+                  }))
+                ]}
+              />
+            </div>
+          </Tooltip>
         </div>
       </Options>
     </Container>

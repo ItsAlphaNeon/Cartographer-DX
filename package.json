@@ -1,12 +1,20 @@
 {
   "name": "cartographer",
   "private": true,
+  "workspaces": [
+    "packages/block-palettes",
+    "packages/generation",
+    "packages/litematica",
+    "packages/pixels",
+    "interface"
+  ],
   "scripts": {
-    "build:packages": "pnpm run -r --filter {./packages/**} build",
-    "build:interface": "cd interface && pnpm build",
-    "build": "pnpm build:packages && pnpm build:interface",
+    "build:packages": "npm run build -w packages/pixels && npm run build -w packages/block-palettes -w packages/litematica && npm run build -w packages/generation",
+    "build:interface": "npm run build -w interface",
+    "build": "npm run build:packages && npm run build:interface",
     "postinstall": "node -e \"try{require('fs').copyFileSync('./scripts/pre-commit.sh','./.git/hooks/pre-commit')}catch(e){}\"",
-    "watch": "pnpm build:packages && cd interface && pnpm watch",
+    "start": "npm run build:packages && npm run build:interface && npm run start -w interface",
+    "watch": "npm run build:packages && npm run watch -w interface",
     "test": "vitest"
   },
   "engines": {

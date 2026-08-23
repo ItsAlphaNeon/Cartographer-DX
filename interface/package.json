@@ -1,4 +1,5 @@
 {
+  "name": "interface",
   "private": true,
   "scripts": {
     "watch": "next dev",
@@ -6,9 +7,9 @@
     "start": "next start"
   },
   "dependencies": {
-    "@cartographer/generation": "workspace:*",
-    "@cartographer/block-palettes": "workspace:*",
-    "@cartographer/pixels": "workspace:*",
+    "@cartographer/generation": "*",
+    "@cartographer/block-palettes": "*",
+    "@cartographer/pixels": "*",
     "@fortawesome/fontawesome-svg-core": "^6.2.1",
     "@fortawesome/free-brands-svg-icons": "^6.2.1",
     "@fortawesome/free-solid-svg-icons": "^6.2.1",

@@ -4,10 +4,16 @@ import * as constants from '../constants';
 import * as comlink from 'comlink';
 import * as defs from '../defs';
 
+export type DitherSettings = {
+  dither: boolean;
+  dither_algorithm?: string;
+};
+
 export type Transformations = {
   saturation?: number;
   brightness?: number;
   dither?: boolean;
+  dither_algorithm?: string;
 };
 export type GenerationParams = {
   image_data: ImageData;
@@ -38,7 +44,10 @@ const baseImagePipeline = (params: GenerationParams) => {
     transformers: [
       pixels.transformers.createColorTransformer(params.transformations || {}),
       params.transformations?.dither
-        ? pixels.transformers.floydSteinbergDitherTransformer(palette_transformer)
+        ? pixels.transformers.createDitherTransformer(
+            palette_transformer,
+            (params.transformations.dither_algorithm as any) || 'floyd-steinberg'
+          )
         : palette_transformer
     ]
   });
