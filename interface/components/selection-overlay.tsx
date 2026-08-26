@@ -25,12 +25,13 @@ const SVGContainer = styled.svg`
   height: 100%;
 `;
 
-const SelectionBox = styled.rect`
+const SelectionBox = styled.rect<{ $isDragging: boolean }>`
   stroke-width: 2px;
   stroke-dasharray: 5px;
   stroke: ${(props) => props.theme['dark-red']};
-  fill: rgba(0, 0, 0, 0.6);
+  fill: ${(props) => (props.$isDragging ? 'rgba(0, 0, 0, 0.6)' : 'transparent')};
   cursor: pointer;
+  transition: fill 0.15s ease;
 `;
 
 const ResizeHandle = styled.rect`
@@ -150,6 +151,7 @@ export const SelectionOverlay: React.FC<OverlayProps> = (props) => {
       }}
     >
       <SelectionBox
+        $isDragging={!!drag_event}
         x={x}
         y={y}
         width={dx}
