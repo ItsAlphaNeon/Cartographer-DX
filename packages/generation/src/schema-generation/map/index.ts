@@ -1,17 +1,19 @@
 import { BlockSpace } from '../../block-generation';
 import * as _ from 'lodash';
 
+const MAP_SIZE = 128;
+
 const getBlockSpaceDimensions = (block_space: BlockSpace) => {
   return block_space.reduce(
     (dimensions, block) => {
       if (block.x > dimensions.width) {
-        dimensions.width = block.x+1;
+        dimensions.width = block.x + 1;
       }
       if (block.y > dimensions.height) {
-        dimensions.height = block.y+1;
+        dimensions.height = block.y + 1;
       }
       if (block.z > dimensions.length) {
-        dimensions.length = block.z+1;
+        dimensions.length = block.z + 1;
       }
       return dimensions;
     },
@@ -25,7 +27,7 @@ export const asNbtObject = (space: BlockSpace): object => {
   const palette: string[] = [];
 
   const addToPalette = (sid: string): number => {
-    if(sid === 'minecraft:air') {
+    if (sid === 'minecraft:air') {
       return 0;
     }
     let id: number = palette.indexOf(sid);
@@ -43,7 +45,7 @@ export const asNbtObject = (space: BlockSpace): object => {
 
   const getSid = (x: number, y: number, z: number): string => {
     const id = index.get(`${x}:${y}:${z}`);
-    if (!id|| id === 'minecraft:air') {
+    if (!id || id === 'minecraft:air') {
       return 'minecraft:air';
     }
     return id;
@@ -52,7 +54,7 @@ export const asNbtObject = (space: BlockSpace): object => {
   const blocks = _.range(width).reduce((blocks, x) => {
     return _.range(length).reduce((blocks, z) => {
       return _.range(height).reduce((blocks, y) => {
-        if(getSid(x, y, z)==='minecraft:air') {
+        if (getSid(x, y, z) === 'minecraft:air') {
           return blocks;
         }
         blocks.push({
@@ -117,4 +119,56 @@ export const asNbtObject = (space: BlockSpace): object => {
       }
     }
   };
+};
+
+/**
+ * Split a BlockSpace into individual 128×128 map tile NBT objects.
+ *
+ * Returns a 2D array [tileZ][tileX] of NBT objects, each representing the
+ * blocks inside its 128×128 tile. Tiles with no blocks will have a null entry.
+ *
+ * This mirrors the REFERENCE's approach of generating one NBT file per map section.
+ */
+export const asSplitNbtObjects = (space: BlockSpace, mapScaleX: number, mapScaleY: number): (object | null)[][] => {
+  // Group blocks by tile coordinates
+  const tiles = new Map<string, BlockSpace>();
+  for (const block of space) {
+    // Each map tile covers 128 blocks in X and Z
+    const tileX = Math.floor(block.x / MAP_SIZE);
+    const tileZ = Math.floor(block.z / MAP_SIZE);
+
+    // Skip blocks that fall outside the expected tile grid
+    if (tileX < 0 || tileX >= mapScaleX || tileZ < 0 || tileZ >= mapScaleY) {
+      continue;
+    }
+
+    const key = `${tileZ}:${tileX}`;
+    if (!tiles.has(key)) {
+      tiles.set(key, []);
+    }
+    // Shift coordinates to be local to the tile (origin at 0,0,0)
+    tiles.get(key)!.push({
+      ...block,
+      x: block.x - tileX * MAP_SIZE,
+      z: block.z - tileZ * MAP_SIZE
+    });
+  }
+
+  // Build the 2D array [tileZ][tileX]
+  const result: (object | null)[][] = [];
+  for (let tileZ = 0; tileZ < mapScaleY; tileZ++) {
+    const row: (object | null)[] = [];
+    for (let tileX = 0; tileX < mapScaleX; tileX++) {
+      const key = `${tileZ}:${tileX}`;
+      const tileBlocks = tiles.get(key);
+      if (tileBlocks && tileBlocks.length > 0) {
+        row.push(asNbtObject(tileBlocks));
+      } else {
+        row.push(null);
+      }
+    }
+    result.push(row);
+  }
+
+  return result;
 };

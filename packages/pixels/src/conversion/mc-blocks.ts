@@ -49,7 +49,7 @@ export const convertPixelGridToMCBlocks = (pixel_grid: defs.PixelGrid, palette: 
   });
 };
 
-const flattenColors = (palette: defs.BlockPalette, spectrum: defs.BlockColorSpectrum) => {
+export const flattenColors = (palette: defs.BlockPalette, spectrum: defs.BlockColorSpectrum) => {
   return palette
     .map((block) => {
       switch (spectrum) {

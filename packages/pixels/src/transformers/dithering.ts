@@ -13,6 +13,41 @@ export type DitherAlgorithm =
   | 'stucki'
   | 'atkinson';
 
+// ---- Color Distance Helpers (matching REFERENCE) ----
+
+const squaredEuclideanDistance = (a: defs.Pixel, b: defs.Pixel): number => {
+  const dr = a.r - b.r;
+  const dg = a.g - b.g;
+  const db = a.b - b.b;
+  return dr * dr + dg * dg + db * db;
+};
+
+/**
+ * Find the two closest palette colors to the given pixel, returning
+ * them along with their squared distances from the target pixel.
+ */
+const findTwoClosestColors = (
+  pixel: defs.Pixel,
+  paletteColors: defs.Pixel[]
+): [closest1: defs.Pixel, closest2: defs.Pixel, dist1: number, dist2: number] => {
+  let best1: defs.Pixel | null = null;
+  let best2: defs.Pixel | null = null;
+  let d1 = Infinity;
+  let d2 = Infinity;
+
+  for (const color of paletteColors) {
+    const d = squaredEuclideanDistance(pixel, color);
+    if (d < d1) {
+      [best2, d2] = [best1, d1];
+      [best1, d1] = [color, d];
+    } else if (d < d2) {
+      [best2, d2] = [color, d];
+    }
+  }
+
+  return [best1!, best2!, d1, d2];
+};
+
 // ---- Error Diffusion Patterns ----
 
 type ErrorDiffusionPattern = {
@@ -96,7 +131,6 @@ const PATTERNS: Record<string, ErrorDiffusionPattern> = {
     divisor: 48
   }
 };
-
 // ---- Error Diffusion Engine ----
 
 const createErrorDiffusionDitherTransformer = (
@@ -162,24 +196,43 @@ const ORDERED_3x3 = [
   [6, 2, 9]
 ];
 
+/**
+ * Create an ordered/Bayer dithering transformer that directly picks between
+ * the two closest palette colors using the dither matrix (matching REFERENCE).
+ *
+ * REFERENCE formula (mapCanvas.jsworker lines 282-289):
+ *   if ((dist1 * (size + 1)) / dist2 > matrixValue) → pick second-closest
+ *   else → pick closest
+ *
+ * The `strength` parameter (0–255) interpolates between "no dithering"
+ * (strength=0, always pick closest) and "full REFERENCE dithering"
+ * (strength=255, use the matrix comparison as-is).
+ */
 const createOrderedDitherTransformer = (
-  inner: defs.PixelTransformer,
+  paletteColors: defs.Pixel[],
   matrix: number[][],
   strength: number
 ): defs.PixelTransformer => {
-  const width = matrix.length;
-  const height = matrix[0].length;
-  const size = width * height;
+  const w = matrix.length;
+  const h = matrix[0].length;
+  const size = w * h;
 
   return (pixel, payload) => {
-    const threshold = matrix[payload.x % width][payload.y % height] / (size + 1);
-    const noise = (threshold - 0.5) * strength;
-    const noisyPixel = {
-      r: Math.max(0, Math.min(255, pixel.r + noise)),
-      g: Math.max(0, Math.min(255, pixel.g + noise)),
-      b: Math.max(0, Math.min(255, pixel.b + noise))
-    };
-    return inner(noisyPixel, payload);
+    const [closest1, closest2, dist1, dist2] = findTwoClosestColors(pixel, paletteColors);
+
+    // Early exit for zero strength — always pick closest (no dithering)
+    if (strength <= 0) {
+      return closest1;
+    }
+
+    const matrixValue = matrix[payload.x % w][payload.y % h];
+    // REFERENCE: (dist1 * (size + 1)) / dist2 > matrixValue → pick second-closest
+    const fullDitherRatio = (dist1 * (size + 1)) / dist2;
+    // Strength factor: 0 = no dither, 1 = full REFERENCE dither
+    const factor = Math.min(strength / 255, 1);
+    // Blend between always-closest (ratio=0) and the REFERENCE comparison
+    const blendedRatio = fullDitherRatio * factor;
+    return blendedRatio > matrixValue ? closest2 : closest1;
   };
 };
 
@@ -190,37 +243,63 @@ export const floydSteinbergDitherTransformer = (transformer: defs.PixelTransform
   return createErrorDiffusionDitherTransformer(transformer, PATTERNS['floyd-steinberg']);
 };
 
+export type DitherTransformerParams = {
+  /**
+   * The inner transformer (palette quantizer) used by error-diffusion algorithms.
+   * Not used for ordered/Bayer algorithms (they quantize internally).
+   */
+  inner?: defs.PixelTransformer;
+  /**
+   * The dithering algorithm to use.
+   */
+  algorithm: DitherAlgorithm;
+  /**
+   * Flattened palette colors from the block palette. **Required for ordered/Bayer
+   * algorithms** (bayer-2x2, bayer-4x4, ordered-3x3). Ignored for error diffusion.
+   */
+  paletteColors?: defs.Pixel[];
+  /**
+   * Dithering strength (0–255), used by ordered/Bayer algorithms to control how
+   * aggressively the matrix influences color selection.
+   * - 0 = no dithering (always pick the closest color)
+   * - 255 = full REFERENCE-matching dithering
+   * Defaults to 48 if not set.
+   */
+  strength?: number;
+};
+
 /**
  * Create a dithering transformer using the specified algorithm.
  *
- * The returned transformer wraps the provided inner transformer and applies
- * dithering (error-diffusion or ordered/Bayer) to improve perceived color
+ * For error-diffusion algorithms, the returned transformer wraps the provided
+ * `inner` transformer and applies error propagation to improve perceived color
  * accuracy after palette quantization.
+ *
+ * For ordered/Bayer algorithms, the transformer **replaces** the inner quantizer
+ * entirely — it directly picks between the two closest palette colors using the
+ * dither matrix. This requires `paletteColors` to be provided.
  */
-export const createDitherTransformer = (
-  inner: defs.PixelTransformer,
-  algorithm: DitherAlgorithm,
-  strength?: number
-): defs.PixelTransformer => {
+export const createDitherTransformer = (params: DitherTransformerParams): defs.PixelTransformer => {
+  const { inner, algorithm, paletteColors, strength } = params;
   switch (algorithm) {
     case 'floyd-steinberg':
-      return createErrorDiffusionDitherTransformer(inner, PATTERNS['floyd-steinberg']);
+      return createErrorDiffusionDitherTransformer(inner!, PATTERNS['floyd-steinberg']);
     case 'burkes':
-      return createErrorDiffusionDitherTransformer(inner, PATTERNS['burkes']);
+      return createErrorDiffusionDitherTransformer(inner!, PATTERNS['burkes']);
     case 'sierra-lite':
-      return createErrorDiffusionDitherTransformer(inner, PATTERNS['sierra-lite']);
+      return createErrorDiffusionDitherTransformer(inner!, PATTERNS['sierra-lite']);
     case 'stucki':
-      return createErrorDiffusionDitherTransformer(inner, PATTERNS['stucki']);
+      return createErrorDiffusionDitherTransformer(inner!, PATTERNS['stucki']);
     case 'atkinson':
-      return createErrorDiffusionDitherTransformer(inner, PATTERNS['atkinson']);
+      return createErrorDiffusionDitherTransformer(inner!, PATTERNS['atkinson']);
     case 'min-avg-err':
-      return createErrorDiffusionDitherTransformer(inner, PATTERNS['min-avg-err']);
+      return createErrorDiffusionDitherTransformer(inner!, PATTERNS['min-avg-err']);
     case 'bayer-2x2':
-      return createOrderedDitherTransformer(inner, BAYER_2x2, strength ?? 48);
+      return createOrderedDitherTransformer(paletteColors!, BAYER_2x2, strength ?? 48);
     case 'bayer-4x4':
-      return createOrderedDitherTransformer(inner, BAYER_4x4, strength ?? 48);
+      return createOrderedDitherTransformer(paletteColors!, BAYER_4x4, strength ?? 48);
     case 'ordered-3x3':
-      return createOrderedDitherTransformer(inner, ORDERED_3x3, strength ?? 48);
+      return createOrderedDitherTransformer(paletteColors!, ORDERED_3x3, strength ?? 48);
   }
 };
 

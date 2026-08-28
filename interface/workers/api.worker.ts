@@ -26,6 +26,9 @@ export type GenerationParams = {
   color_spectrum: pixels.BlockColorSpectrum;
 
   transformations?: Transformations;
+
+  /** When true, export will produce split per-map-tile files instead of a single merged file */
+  split?: boolean;
 };
 
 const baseImagePipeline = (params: GenerationParams) => {
@@ -38,20 +41,38 @@ const baseImagePipeline = (params: GenerationParams) => {
   const image_data = context.getImageData(x, y, dx, dy);
 
   const palette_transformer = pixels.conversion.createColorPaletteTransformer(params);
+  const transformations = params.transformations || {};
+
+  // Determine which dither algorithm is being used
+  const algorithm = (transformations.dither_algorithm as pixels.transformers.DitherAlgorithm) || 'floyd-steinberg';
+  const isOrdered = pixels.transformers.DITHER_ORDERED_ALGORITHMS.has(algorithm);
+
+  // For ordered/Bayer algorithms, we need the flattened palette colors
+  // so the transformer can pick between the two closest colors directly
+  let transformer: pixels.PixelTransformer;
+  if (transformations.dither && isOrdered) {
+    const flattened = Object.values(
+      pixels.conversion.flattenColors(params.palette, params.color_spectrum)
+    ) as pixels.Pixel[];
+    transformer = pixels.transformers.createDitherTransformer({
+      algorithm,
+      paletteColors: flattened,
+      strength: transformations.dither_strength ?? 48
+    });
+  } else if (transformations.dither) {
+    transformer = pixels.transformers.createDitherTransformer({
+      inner: palette_transformer,
+      algorithm
+    });
+  } else {
+    transformer = palette_transformer;
+  }
+
   return pixels.conversion.scaleAndProcessImageData({
     image_data,
     target_width: params.scale.x * constants.SCALE_FACTOR,
     target_height: params.scale.y * constants.SCALE_FACTOR,
-    transformers: [
-      pixels.transformers.createColorTransformer(params.transformations || {}),
-      params.transformations?.dither
-        ? pixels.transformers.createDitherTransformer(
-            palette_transformer,
-            (params.transformations.dither_algorithm as any) || 'floyd-steinberg',
-            params.transformations.dither_strength
-          )
-        : palette_transformer
-    ]
+    transformers: [pixels.transformers.createColorTransformer(transformations), transformer]
   });
 };
 
@@ -90,14 +111,64 @@ const generateBlockSpaceFromImageData = (params: BlockGenerationParams) => {
 
 export const generateLightmaticaSchema = async (params: BlockGenerationParams) => {
   const block_space = generateBlockSpaceFromImageData(params);
-  const schema = generation.schema_generation.litematica.generateLitematicaSchema(block_space);
-  return await generation.serialization.serializeNBTData(schema);
+  const mapScaleX = params.scale.x;
+  const mapScaleY = params.scale.y;
+
+  if (params.split) {
+    // Generate individual schemas per map tile and bundle into a zip
+    const JSZip = await import('jszip');
+    const zip = new JSZip.default();
+
+    const tiles = generation.schema_generation.litematica.generateSplitLitematicaSchemas(
+      block_space,
+      mapScaleX,
+      mapScaleY
+    );
+
+    for (let tileZ = 0; tileZ < tiles.length; tileZ++) {
+      for (let tileX = 0; tileX < (tiles[0]?.length ?? 0); tileX++) {
+        const tile = tiles[tileZ]?.[tileX];
+        if (tile) {
+          const serialized = await generation.serialization.serializeNBTData(tile);
+          zip.file(`map_x${tileX}_z${tileZ}.litematic`, serialized);
+        }
+      }
+    }
+
+    return await zip.generateAsync({ type: 'uint8array' });
+  } else {
+    const schema = generation.schema_generation.litematica.generateLitematicaSchema(block_space);
+    return await generation.serialization.serializeNBTData(schema);
+  }
 };
 
 export const generateMapNBT = async (params: BlockGenerationParams) => {
   const block_space = generateBlockSpaceFromImageData(params);
-  const map = generation.schema_generation.map.asNbtObject(block_space);
-  return await generation.serialization.serializeNBTData(map);
+  const mapScaleX = params.scale.x;
+  const mapScaleY = params.scale.y;
+
+  if (params.split) {
+    // Generate individual NBT files per map tile and bundle into a zip
+    const JSZip = await import('jszip');
+    const zip = new JSZip.default();
+
+    const tiles = generation.schema_generation.map.asSplitNbtObjects(block_space, mapScaleX, mapScaleY);
+
+    for (let tileZ = 0; tileZ < tiles.length; tileZ++) {
+      for (let tileX = 0; tileX < (tiles[0]?.length ?? 0); tileX++) {
+        const tile = tiles[tileZ]?.[tileX];
+        if (tile) {
+          const serialized = await generation.serialization.serializeNBTData(tile);
+          zip.file(`map_x${tileX}_z${tileZ}.nbt`, serialized);
+        }
+      }
+    }
+
+    return await zip.generateAsync({ type: 'uint8array' });
+  } else {
+    const map = generation.schema_generation.map.asNbtObject(block_space);
+    return await generation.serialization.serializeNBTData(map);
+  }
 };
 
 export const generateMapJSON = async (params: BlockGenerationParams) => {

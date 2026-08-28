@@ -130,6 +130,7 @@ export default function Root() {
     utils.applyPalettePatch(block_palettes.palettes['1.19'], patches[0].patch)
   );
   const [materials_list_visible, showMaterialsList] = React.useState(false);
+  const [split_export, setSplitExport] = React.useState(false);
 
   const [staircase_alg, setStaircaseAlg] = React.useState(generation.block_generation.StaircaseAlgorithm.Boundary);
   const [support_block_id, setSupportBlockId] = React.useState('minecraft:cobblestone');
@@ -157,7 +158,8 @@ export default function Root() {
       color_spectrum,
       staircase_alg,
       support_block_id,
-      transformations
+      transformations,
+      split: split_export
     };
 
     setGenerationError(false);
@@ -166,12 +168,14 @@ export default function Root() {
       switch (type) {
         case 'litematic': {
           const schema_nbt = await api.current.generateLitematicaSchema(params);
-          utils.download(schema_nbt, 'map.litematic');
+          const ext = split_export ? '.zip' : '.litematic';
+          utils.download(schema_nbt, `map${ext}`);
           break;
         }
         case 'nbt': {
           const nbt = await api.current.generateMapNBT(params);
-          utils.download(nbt, 'map.nbt');
+          const ext = split_export ? '.zip' : '.nbt';
+          utils.download(nbt, `map${ext}`);
           break;
         }
         case 'json': {
@@ -398,6 +402,18 @@ export default function Root() {
                           showMaterialsList(true);
                         }
                       }
+                    ]}
+                  />
+
+                  <CheckBox
+                    style={{ marginRight: 10 }}
+                    label="Export as individual maps"
+                    label_side="left"
+                    value={split_export}
+                    onChange={setSplitExport}
+                    tooltip={[
+                      'When enabled, each 128×128 map tile will be exported as its own file, bundled into a zip archive.',
+                      'When disabled, the entire mapart is exported as a single file.'
                     ]}
                   />
 
