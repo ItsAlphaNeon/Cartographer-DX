@@ -1,7 +1,5 @@
 import * as defs from '../definitions';
 
-type ErrorTuple = [factor: number, r: number, g: number, b: number];
-
 export type DitherAlgorithm =
   | 'floyd-steinberg'
   | 'bayer-2x2'
@@ -25,6 +23,9 @@ const squaredEuclideanDistance = (a: defs.Pixel, b: defs.Pixel): number => {
 /**
  * Find the two closest palette colors to the given pixel, returning
  * them along with their squared distances from the target pixel.
+ * Includes REFERENCE's edge-case guard: if distance(closest1, closest2)
+ * ≤ distance(pixel, closest2), then closest2 is set to closest1 to
+ * prevent spurious dithering between nearly-identical colors.
  */
 const findTwoClosestColors = (
   pixel: defs.Pixel,
@@ -45,135 +46,238 @@ const findTwoClosestColors = (
     }
   }
 
+  // REFERENCE edge-case guard: if the two closest palette colors are
+  // closer to each other than the second-closest is to the pixel,
+  // they're effectively the same color — no dithering to be done.
+  if (best2 !== null && squaredEuclideanDistance(best1!, best2!) <= d2) {
+    best2 = best1;
+    d2 = d1;
+  }
+
   return [best1!, best2!, d1, d2];
 };
 
-// ---- Error Diffusion Patterns ----
+// ---- Error Diffusion Patterns (REFERENCE 3×5 ditherMatrix format) ----
 
 type ErrorDiffusionPattern = {
-  offsets: Array<[dx: number, dy: number, weight: number]>;
+  matrix: number[][];
   divisor: number;
 };
 
-const PATTERNS: Record<string, ErrorDiffusionPattern> = {
+const ERROR_DIFFUSION_PATTERNS: Record<string, ErrorDiffusionPattern> = {
   'floyd-steinberg': {
-    offsets: [
-      [1, 0, 7],
-      [-1, 1, 3],
-      [0, 1, 5],
-      [1, 1, 1]
+    matrix: [
+      [0, 0, 0, 7, 0],
+      [0, 3, 5, 1, 0],
+      [0, 0, 0, 0, 0]
     ],
     divisor: 16
   },
+  'min-avg-err': {
+    matrix: [
+      [0, 0, 0, 7, 5],
+      [3, 5, 7, 5, 3],
+      [1, 3, 5, 3, 1]
+    ],
+    divisor: 48
+  },
   burkes: {
-    offsets: [
-      [1, 0, 8],
-      [2, 0, 4],
-      [-2, 1, 2],
-      [-1, 1, 4],
-      [0, 1, 8],
-      [1, 1, 4],
-      [2, 1, 2]
+    matrix: [
+      [0.0, 0.0, 0.0, 8.0, 4.0],
+      [2.0, 4.0, 8.0, 4.0, 2.0],
+      [0.0, 0.0, 0.0, 0.0, 0.0]
     ],
     divisor: 32
   },
   'sierra-lite': {
-    offsets: [
-      [1, 0, 2],
-      [2, 0, 1],
-      [-1, 1, 1]
+    matrix: [
+      [0, 0, 0, 2, 0],
+      [0, 1, 1, 0, 0],
+      [0, 0, 0, 0, 0]
     ],
     divisor: 4
   },
   stucki: {
-    offsets: [
-      [1, 0, 8],
-      [2, 0, 4],
-      [-2, 1, 2],
-      [-1, 1, 4],
-      [0, 1, 8],
-      [1, 1, 4],
-      [2, 1, 2],
-      [-2, 2, 1],
-      [-1, 2, 2],
-      [0, 2, 4],
-      [1, 2, 2],
-      [2, 2, 1]
+    matrix: [
+      [0.0, 0.0, 0.0, 8.0, 4.0],
+      [2.0, 4.0, 8.0, 4.0, 2.0],
+      [1.0, 2.0, 4.0, 2.0, 1.0]
     ],
     divisor: 42
   },
   atkinson: {
-    offsets: [
-      [1, 0, 1],
-      [2, 0, 1],
-      [-1, 1, 1],
-      [0, 1, 1],
-      [1, 1, 1],
-      [0, 2, 1]
+    matrix: [
+      [0, 0, 0, 1, 1],
+      [0, 1, 1, 1, 0],
+      [0, 0, 1, 0, 0]
     ],
     divisor: 8
-  },
-  'min-avg-err': {
-    offsets: [
-      [1, 0, 7],
-      [2, 0, 5],
-      [-2, 1, 3],
-      [-1, 1, 5],
-      [0, 1, 7],
-      [1, 1, 5],
-      [2, 1, 3],
-      [-2, 2, 1],
-      [-1, 2, 3],
-      [0, 2, 5],
-      [1, 2, 3],
-      [2, 2, 1]
-    ],
-    divisor: 48
   }
 };
-// ---- Error Diffusion Engine ----
+/**
+ * Apply error-diffusion dithering directly to a flat RGBA buffer (ImageData.data).
+ *
+ * Processes pixels left-to-right, top-to-bottom in scanline order — matching
+ * REFERENCE's approach exactly. For each pixel:
+ *   1. Finds the closest palette color
+ *   2. Writes it to the buffer
+ *   3. Computes quantization error (original − chosen)
+ *   4. Propagates error × weight/divisor to neighboring pixels' RGBA values
+ *      in the same buffer (these modified values are seen by later pixels).
+ *
+ * The error is propagated according to a 3×5 dither matrix where the current
+ * pixel is at [row=1][col=2]:
+ *   Row 0 (dy=0): columns dx=+1, dx=+2
+ *   Row 1 (dy=1): columns dx=−2, dx=−1, dx=0, dx=+1, dx=+2
+ *   Row 2 (dy=2): columns dx=−2, dx=−1, dx=0, dx=+1, dx=+2
+ */
+export const applyErrorDiffusionToBuffer = (
+  buffer: Uint8ClampedArray,
+  width: number,
+  height: number,
+  paletteColors: defs.Pixel[],
+  algorithm: DitherAlgorithm
+): void => {
+  const patternInfo = ERROR_DIFFUSION_PATTERNS[algorithm];
+  if (!patternInfo) {
+    throw new Error(`Unknown error diffusion algorithm: ${algorithm}`);
+  }
+  const { matrix, divisor } = patternInfo;
 
-const createErrorDiffusionDitherTransformer = (
-  inner: defs.PixelTransformer,
-  pattern: ErrorDiffusionPattern
-): defs.PixelTransformer => {
-  const errorCache = new Map<string, ErrorTuple[]>();
+  // Pre-convert palette to a flat array for fast access
+  const palette = paletteColors.map((c) => ({ r: c.r, g: c.g, b: c.b }));
 
-  const pushError = (tuple: ErrorTuple, x: number, y: number) => {
-    const key = `${x}:${y}`;
-    const tuples = errorCache.get(key);
-    if (tuples) {
-      return tuples.push(tuple);
+  // Find the closest palette color by squared Euclidean distance
+  const findClosest = (r: number, g: number, b: number): { r: number; g: number; b: number } => {
+    let bestDist = Infinity;
+    let bestIdx = 0;
+    for (let i = 0; i < palette.length; i++) {
+      const c = palette[i];
+      const dr = r - c.r;
+      const dg = g - c.g;
+      const db = b - c.b;
+      const dist = dr * dr + dg * dg + db * db;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
     }
-    errorCache.set(key, [tuple]);
+    return palette[bestIdx];
   };
 
-  return (pixel, payload) => {
-    const key = `${payload.x}:${payload.y}`;
-    const errors = errorCache.get(key) || [];
-    errorCache.delete(key);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
 
-    const adjustedPixel = errors.reduce(
-      (acc, [factor, r, g, b]) => ({
-        r: acc.r + (r * factor) / pattern.divisor,
-        g: acc.g + (g * factor) / pattern.divisor,
-        b: acc.b + (b * factor) / pattern.divisor
-      }),
-      pixel
-    );
+      const oldR = buffer[i];
+      const oldG = buffer[i + 1];
+      const oldB = buffer[i + 2];
 
-    const newPixel = inner(adjustedPixel, payload);
+      const closest = findClosest(oldR, oldG, oldB);
 
-    const rErr = adjustedPixel.r - newPixel.r;
-    const gErr = adjustedPixel.g - newPixel.g;
-    const bErr = adjustedPixel.b - newPixel.b;
+      // Write quantized color
+      buffer[i] = closest.r;
+      buffer[i + 1] = closest.g;
+      buffer[i + 2] = closest.b;
+      buffer[i + 3] = 255;
 
-    for (const [dx, dy, weight] of pattern.offsets) {
-      pushError([weight, rErr, gErr, bErr], payload.x + dx, payload.y + dy);
+      const errR = oldR - closest.r;
+      const errG = oldG - closest.g;
+      const errB = oldB - closest.b;
+
+      // Propagate error using 3×5 dither matrix (REFERENCE-compatible)
+      // Row 0: same row, to the right
+      if (x + 1 < width) {
+        const w0 = matrix[0][3] / divisor;
+        buffer[i + 4] += errR * w0;
+        buffer[i + 5] += errG * w0;
+        buffer[i + 6] += errB * w0;
+
+        if (x + 2 < width) {
+          const w1 = matrix[0][4] / divisor;
+          buffer[i + 8] += errR * w1;
+          buffer[i + 9] += errG * w1;
+          buffer[i + 10] += errB * w1;
+        }
+      }
+
+      // Row 1: 1 row down
+      if (y + 1 < height) {
+        const nextRowOff = width * 4;
+
+        if (x > 0) {
+          const w2 = matrix[1][1] / divisor;
+          buffer[i + nextRowOff - 4] += errR * w2;
+          buffer[i + nextRowOff - 3] += errG * w2;
+          buffer[i + nextRowOff - 2] += errB * w2;
+
+          if (x > 1) {
+            const w3 = matrix[1][0] / divisor;
+            buffer[i + nextRowOff - 8] += errR * w3;
+            buffer[i + nextRowOff - 7] += errG * w3;
+            buffer[i + nextRowOff - 6] += errB * w3;
+          }
+        }
+
+        const w4 = matrix[1][2] / divisor;
+        buffer[i + nextRowOff] += errR * w4;
+        buffer[i + nextRowOff + 1] += errG * w4;
+        buffer[i + nextRowOff + 2] += errB * w4;
+
+        if (x + 1 < width) {
+          const w5 = matrix[1][3] / divisor;
+          buffer[i + nextRowOff + 4] += errR * w5;
+          buffer[i + nextRowOff + 5] += errG * w5;
+          buffer[i + nextRowOff + 6] += errB * w5;
+
+          if (x + 2 < width) {
+            const w6 = matrix[1][4] / divisor;
+            buffer[i + nextRowOff + 8] += errR * w6;
+            buffer[i + nextRowOff + 9] += errG * w6;
+            buffer[i + nextRowOff + 10] += errB * w6;
+          }
+        }
+      }
+
+      // Row 2: 2 rows down
+      if (y + 2 < height) {
+        const twoRowsOff = width * 8;
+
+        if (x > 0) {
+          const w7 = matrix[2][1] / divisor;
+          buffer[i + twoRowsOff - 4] += errR * w7;
+          buffer[i + twoRowsOff - 3] += errG * w7;
+          buffer[i + twoRowsOff - 2] += errB * w7;
+
+          if (x > 1) {
+            const w8 = matrix[2][0] / divisor;
+            buffer[i + twoRowsOff - 8] += errR * w8;
+            buffer[i + twoRowsOff - 7] += errG * w8;
+            buffer[i + twoRowsOff - 6] += errB * w8;
+          }
+        }
+
+        const w9 = matrix[2][2] / divisor;
+        buffer[i + twoRowsOff] += errR * w9;
+        buffer[i + twoRowsOff + 1] += errG * w9;
+        buffer[i + twoRowsOff + 2] += errB * w9;
+
+        if (x + 1 < width) {
+          const w10 = matrix[2][3] / divisor;
+          buffer[i + twoRowsOff + 4] += errR * w10;
+          buffer[i + twoRowsOff + 5] += errG * w10;
+          buffer[i + twoRowsOff + 6] += errB * w10;
+
+          if (x + 2 < width) {
+            const w11 = matrix[2][4] / divisor;
+            buffer[i + twoRowsOff + 8] += errR * w11;
+            buffer[i + twoRowsOff + 9] += errG * w11;
+            buffer[i + twoRowsOff + 10] += errB * w11;
+          }
+        }
+      }
     }
-
-    return newPixel;
-  };
+  }
 };
 
 // ---- Ordered / Bayer Dithering ----
@@ -238,24 +342,15 @@ const createOrderedDitherTransformer = (
 
 // ---- Public API ----
 
-/** @deprecated Use createDitherTransformer with 'floyd-steinberg' instead */
-export const floydSteinbergDitherTransformer = (transformer: defs.PixelTransformer): defs.PixelTransformer => {
-  return createErrorDiffusionDitherTransformer(transformer, PATTERNS['floyd-steinberg']);
-};
-
 export type DitherTransformerParams = {
   /**
-   * The inner transformer (palette quantizer) used by error-diffusion algorithms.
-   * Not used for ordered/Bayer algorithms (they quantize internally).
-   */
-  inner?: defs.PixelTransformer;
-  /**
-   * The dithering algorithm to use.
+   * The dithering algorithm to use. Only ordered/Bayer algorithms are
+   * supported here; error-diffusion algorithms use `applyErrorDiffusionToBuffer`.
    */
   algorithm: DitherAlgorithm;
   /**
-   * Flattened palette colors from the block palette. **Required for ordered/Bayer
-   * algorithms** (bayer-2x2, bayer-4x4, ordered-3x3). Ignored for error diffusion.
+   * Flattened palette colors from the block palette. Required for ordered/Bayer
+   * algorithms (bayer-2x2, bayer-4x4, ordered-3x3).
    */
   paletteColors?: defs.Pixel[];
   /**
@@ -271,35 +366,27 @@ export type DitherTransformerParams = {
 /**
  * Create a dithering transformer using the specified algorithm.
  *
- * For error-diffusion algorithms, the returned transformer wraps the provided
- * `inner` transformer and applies error propagation to improve perceived color
- * accuracy after palette quantization.
+ * Only supports ordered/Bayer algorithms (bayer-2x2, bayer-4x4, ordered-3x3).
+ * Error-diffusion algorithms are handled separately via `applyErrorDiffusionToBuffer`
+ * which operates on a flat RGBA buffer at the target resolution.
  *
- * For ordered/Bayer algorithms, the transformer **replaces** the inner quantizer
- * entirely — it directly picks between the two closest palette colors using the
- * dither matrix. This requires `paletteColors` to be provided.
+ * For ordered/Bayer algorithms, the transformer directly picks between the two
+ * closest palette colors using the dither matrix, requiring `paletteColors`.
  */
 export const createDitherTransformer = (params: DitherTransformerParams): defs.PixelTransformer => {
-  const { inner, algorithm, paletteColors, strength } = params;
+  const { algorithm, paletteColors, strength } = params;
   switch (algorithm) {
-    case 'floyd-steinberg':
-      return createErrorDiffusionDitherTransformer(inner!, PATTERNS['floyd-steinberg']);
-    case 'burkes':
-      return createErrorDiffusionDitherTransformer(inner!, PATTERNS['burkes']);
-    case 'sierra-lite':
-      return createErrorDiffusionDitherTransformer(inner!, PATTERNS['sierra-lite']);
-    case 'stucki':
-      return createErrorDiffusionDitherTransformer(inner!, PATTERNS['stucki']);
-    case 'atkinson':
-      return createErrorDiffusionDitherTransformer(inner!, PATTERNS['atkinson']);
-    case 'min-avg-err':
-      return createErrorDiffusionDitherTransformer(inner!, PATTERNS['min-avg-err']);
     case 'bayer-2x2':
       return createOrderedDitherTransformer(paletteColors!, BAYER_2x2, strength ?? 48);
     case 'bayer-4x4':
       return createOrderedDitherTransformer(paletteColors!, BAYER_4x4, strength ?? 48);
     case 'ordered-3x3':
       return createOrderedDitherTransformer(paletteColors!, ORDERED_3x3, strength ?? 48);
+    default:
+      throw new Error(
+        `createDitherTransformer does not support '${algorithm}'. ` +
+          `Use applyErrorDiffusionToBuffer for error-diffusion algorithms.`
+      );
   }
 };
 

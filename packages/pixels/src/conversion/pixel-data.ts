@@ -137,3 +137,53 @@ export const scaleAndProcessImageData = (params: ProcessImageDataParams) => {
 
   return pixel_grid;
 };
+/**
+ * Convert a PixelGrid to a flat RGBA Uint8ClampedArray buffer,
+ * suitable for ImageData or for use with applyErrorDiffusionToBuffer.
+ */
+export const pixelGridToFlatBuffer = (grid: defs.PixelGrid, width: number, height: number): Uint8ClampedArray => {
+  const buffer = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const pixel = grid[y][x];
+      buffer[i] = pixel.r;
+      buffer[i + 1] = pixel.g;
+      buffer[i + 2] = pixel.b;
+      buffer[i + 3] = 255;
+    }
+  }
+  return buffer;
+};
+
+/**
+ * Convert a flat RGBA Uint8ClampedArray buffer back to a PixelGrid.
+ * Only the R, G, B channels are read; alpha is ignored.
+ */
+export const flatBufferToPixelGrid = (buffer: Uint8ClampedArray, width: number, height: number): defs.PixelGrid => {
+  const grid: defs.PixelGrid = [];
+  for (let y = 0; y < height; y++) {
+    const row: defs.Pixel[] = [];
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      row.push({ r: buffer[i], g: buffer[i + 1], b: buffer[i + 2] });
+    }
+    grid.push(row);
+  }
+  return grid;
+};
+
+/**
+ * Convert an ImageData object to a PixelGrid.
+ */
+export const imageDataToPixelGrid = (imageData: ImageData): defs.PixelGrid => {
+  return flatBufferToPixelGrid(imageData.data, imageData.width, imageData.height);
+};
+
+/**
+ * Convert a PixelGrid to an ImageData object.
+ */
+export const pixelGridToImageData = (grid: defs.PixelGrid, width: number, height: number): ImageData => {
+  const buffer = pixelGridToFlatBuffer(grid, width, height);
+  return new ImageData(buffer, width, height);
+};

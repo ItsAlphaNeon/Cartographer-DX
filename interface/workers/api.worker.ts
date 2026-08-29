@@ -46,6 +46,37 @@ const baseImagePipeline = (params: GenerationParams) => {
   // Determine which dither algorithm is being used
   const algorithm = (transformations.dither_algorithm as pixels.transformers.DitherAlgorithm) || 'floyd-steinberg';
   const isOrdered = pixels.transformers.DITHER_ORDERED_ALGORITHMS.has(algorithm);
+  const isErrorDiffusion = transformations.dither && !isOrdered;
+
+  const targetWidth = params.scale.x * constants.SCALE_FACTOR;
+  const targetHeight = params.scale.y * constants.SCALE_FACTOR;
+  const colorTransformer = pixels.transformers.createColorTransformer(transformations);
+
+  if (isErrorDiffusion) {
+    // --- Error-diffusion path ---
+    // Step 1: Downscale + apply color correction (no palette quantization yet)
+    const scaledGrid = pixels.conversion.scaleAndProcessImageData({
+      image_data,
+      target_width: targetWidth,
+      target_height: targetHeight,
+      transformers: [colorTransformer]
+    });
+
+    // Step 2: Convert to flat RGBA buffer
+    const buffer = pixels.conversion.pixelGridToFlatBuffer(scaledGrid, targetWidth, targetHeight);
+
+    // Step 3: Get flattened palette colors
+    const flattened = Object.values(
+      pixels.conversion.flattenColors(params.palette, params.color_spectrum)
+    ) as pixels.Pixel[];
+
+    // Step 4: Apply error diffusion directly on the buffer
+    // (quantizes to palette and propagates error to neighboring pixels)
+    pixels.transformers.applyErrorDiffusionToBuffer(buffer, targetWidth, targetHeight, flattened, algorithm);
+
+    // Step 5: Convert back to PixelGrid
+    return pixels.conversion.flatBufferToPixelGrid(buffer, targetWidth, targetHeight);
+  }
 
   // For ordered/Bayer algorithms, we need the flattened palette colors
   // so the transformer can pick between the two closest colors directly
@@ -59,20 +90,15 @@ const baseImagePipeline = (params: GenerationParams) => {
       paletteColors: flattened,
       strength: transformations.dither_strength ?? 48
     });
-  } else if (transformations.dither) {
-    transformer = pixels.transformers.createDitherTransformer({
-      inner: palette_transformer,
-      algorithm
-    });
   } else {
     transformer = palette_transformer;
   }
 
   return pixels.conversion.scaleAndProcessImageData({
     image_data,
-    target_width: params.scale.x * constants.SCALE_FACTOR,
-    target_height: params.scale.y * constants.SCALE_FACTOR,
-    transformers: [pixels.transformers.createColorTransformer(transformations), transformer]
+    target_width: targetWidth,
+    target_height: targetHeight,
+    transformers: [colorTransformer, transformer]
   });
 };
 

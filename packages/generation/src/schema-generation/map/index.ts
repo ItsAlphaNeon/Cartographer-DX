@@ -133,11 +133,14 @@ export const asSplitNbtObjects = (space: BlockSpace, mapScaleX: number, mapScale
   // Group blocks by tile coordinates
   const tiles = new Map<string, BlockSpace>();
   for (const block of space) {
-    // Each map tile covers 128 blocks in X and Z
+    // Each map tile covers 128 blocks in X and Z.
+    // The block space offsets every image block by +1 on the Z axis (reserving Z=0 for the
+    // north support block), so tile membership must be computed from block.z - 1.
     const tileX = Math.floor(block.x / MAP_SIZE);
-    const tileZ = Math.floor(block.z / MAP_SIZE);
+    const tileZ = Math.floor((block.z - 1) / MAP_SIZE);
 
-    // Skip blocks that fall outside the expected tile grid
+    // Skip blocks that fall outside the expected tile grid (this also drops the
+    // single north support block at Z=0, which is not part of any tile's image)
     if (tileX < 0 || tileX >= mapScaleX || tileZ < 0 || tileZ >= mapScaleY) {
       continue;
     }
@@ -150,7 +153,7 @@ export const asSplitNbtObjects = (space: BlockSpace, mapScaleX: number, mapScale
     tiles.get(key)!.push({
       ...block,
       x: block.x - tileX * MAP_SIZE,
-      z: block.z - tileZ * MAP_SIZE
+      z: block.z - 1 - tileZ * MAP_SIZE
     });
   }
 
